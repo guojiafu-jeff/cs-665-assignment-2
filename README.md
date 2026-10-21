@@ -40,11 +40,11 @@ All shops and drivers share one `DeliveryDispatcher`. Shops never talk to driver
 ```java
 DeliveryDispatcher dispatcher = new DeliveryDispatcher();
 Shop shop = new Shop("Corner Shop", dispatcher);
-Driver ann = new Driver("Ann", VehicleType.VAN, dispatcher);   // subscribes itself
+Driver a = new Driver("A", VehicleType.VAN, dispatcher);   // subscribes itself
 // ... four more drivers ...
 DeliveryRequest request = shop.receiveOrder("2 kg apples", "12 Main St"); // broadcast
-ann.accept(request);      // true: request is ASSIGNED to Ann, Ann is busy
-ann.abandon(request);     // request is OPEN again and broadcast once more
+a.accept(request);      // true: request is ASSIGNED to A, A is busy
+a.abandon(request);     // request is OPEN again and broadcast once more
 ```
 
 How the classes work together:
