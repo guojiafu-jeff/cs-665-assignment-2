@@ -128,9 +128,6 @@ everywhere and is tested once, which means fewer bugs.
   the pushed event. It was chosen because the problem is exactly the one the pattern solves:
   one event must reach a varying number of receivers, and the sender must not depend on who
   they are. The push style means drivers are informed immediately, without polling.
-- The dispatcher also coordinates shops and drivers so that they never reference each other;
-  this resembles the Mediator pattern, which has not been covered in class yet, so it is
-  mentioned here only as a resemblance.
 
 ## Tests
 
