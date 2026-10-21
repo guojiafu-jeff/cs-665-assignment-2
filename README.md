@@ -1,30 +1,156 @@
 
+
 | CS-665       | Software Design & Patterns |
 |--------------|----------------------------|
-| Name         | FIRST_NAME LAST_NAME       |
-| Date         | MM/DD/YYYY                 |
-| Course       | Fall / Spring / Summer     |
-| Assignment # |                            |
+| Name         | Jiafu Guo                  |
+| Date         | 10/20/2026                 |
+| Course       | Fall 2026                  |
+| Assignment # | 2                          |
 
 # Assignment Overview
-Please add a paragraph or two overviewing the objectives of the assignment.
+
+A group of retailers in a busy city deliver products with local freelance van, taxi and
+scooter drivers. This project is the notification system behind that collaboration: when a
+shop receives a product order from a customer, a delivery request is generated and sent to
+all available drivers. As an extension, drivers can accept a request (first come, first
+served), abandon it (the request is broadcast again) or complete it, and the system keeps
+the state of every request.
+
+There is no graphical or command line user interface. The user interactions are implemented
+as sequences of JUnit tests, as required by the assignment; `Main` only runs a short console
+demo using Log4j output.
 
 # GitHub Repository Link:
-https://github.com/{YOUR_USERNAME}/cs-665-assignment-{ASSIGNMENT_NUMBER}
+https://github.com/guojiafu-jeff/cs-665-assignment-2
 
-# Implementation Description 
+# Implementation Description
 
+## Design overview
 
-For each assignment, please answer the following:
+The code is organized in three packages that mirror the three ideas of the problem:
 
-- Explain the level of flexibility in your implementation, including how new object types can
-be easily added or removed in the future.
-- Discuss the simplicity and understandability of your implementation, ensuring that it is
-easy for others to read and maintain.
-- Describe how you have avoided duplicated code and why it is important.
-- If applicable, mention any design patterns you have used and explain why they were
-chosen.
+| Package | Classes | Responsibility |
+|---|---|---|
+| `edu.bu.met.cs665.notification` | `Publisher<T>`, `Subscriber<T>` (interfaces) | The two roles of the Observer pattern, independent of deliveries. |
+| `edu.bu.met.cs665.delivery` | `DeliveryRequest`, `RequestStatus` (enum), `DeliveryDispatcher` | The request itself, its life cycle, and the central dispatch center. |
+| `edu.bu.met.cs665.participant` | `Shop`, `Driver`, `VehicleType` (enum) | The two kinds of participants. |
 
+All shops and drivers share one `DeliveryDispatcher`. Shops never talk to drivers directly:
+
+```java
+DeliveryDispatcher dispatcher = new DeliveryDispatcher();
+Shop shop = new Shop("Corner Shop", dispatcher);
+Driver ann = new Driver("Ann", VehicleType.VAN, dispatcher);   // subscribes itself
+// ... four more drivers ...
+DeliveryRequest request = shop.receiveOrder("2 kg apples", "12 Main St"); // broadcast
+ann.accept(request);      // true: request is ASSIGNED to Ann, Ann is busy
+ann.abandon(request);     // request is OPEN again and broadcast once more
+```
+
+How the classes work together:
+
+- `Shop.receiveOrder()` creates a `DeliveryRequest` and hands it to `DeliveryDispatcher.submit()`.
+- `DeliveryDispatcher` registers the request as OPEN and calls `notifySubscribers()`, which
+  pushes the request to every subscriber whose `isAvailable()` is true. The dispatcher only
+  knows the `Subscriber` interface, never the `Driver` class.
+- `Driver.update()` stores the request in the driver's list of received requests.
+- `Driver.accept()`, `abandon()` and `complete()` report back to the dispatcher, which is the
+  only place that changes a request's state (`DeliveryRequest`'s setters are package-private).
+  The driver is responsible for its own availability flag: busy after accepting, free again
+  after completing or abandoning, and it can go off duty with `setAvailable(false)`.
+
+Request life cycle: OPEN → ASSIGNED (accept) → COMPLETED (complete); ASSIGNED → OPEN
+(abandon, followed by a new broadcast). COMPLETED is final.
+
+Errors: `accept()` returns `false` when the request is no longer OPEN, because being beaten
+by another driver is a normal outcome. `abandon()` and `complete()` throw
+`IllegalStateException` when the caller is not the assigned driver, and all methods throw
+`IllegalArgumentException` for null arguments or unknown requests. A rejected call leaves the
+request and the drivers unchanged.
+
+## Assumptions
+
+1. All shops and drivers share one dispatch center; the dispatcher is created once and passed
+   to every shop and driver (no Singleton, so every test can use a fresh instance).
+2. A request is handled by exactly one driver at a time; the first driver to accept gets it.
+3. A driver's availability is a switch: drivers can go on or off duty, become busy
+   automatically after accepting, and become free again after completing or abandoning.
+4. A broadcast reaches only the drivers available at that moment. If no driver is available
+   the request stays OPEN and can be found with `getOpenRequests()`.
+5. Abandoning a request broadcasts it again to the drivers available at that moment.
+   Completing is final.
+6. Shops do not receive notifications; they follow a request through its status. Letting
+   shops subscribe as well is a possible extension, since the publisher only needs the
+   `Subscriber` interface.
+7. The vehicle type (van, taxi, scooter) is a property of a driver; all drivers behave the
+   same way, so it is an enum, not a class hierarchy.
+8. Every request gets a unique id from a shared counter; ids are for logs and tests, the
+   program itself identifies requests by object.
+
+## Flexibility
+
+- A new kind of subscriber (a shop that wants updates, a drone fleet) only implements
+  `Subscriber<DeliveryRequest>`; `DeliveryDispatcher` does not change, because it depends on
+  the interface only.
+- A new vehicle type is one new constant in `VehicleType`.
+- Shops and drivers never reference each other, so either side can change independently.
+- The request life cycle lives in one class (`DeliveryDispatcher`) and one enum
+  (`RequestStatus`); adding a state such as CANCELLED touches only those two.
+- The `notification` package is generic (`Publisher<T>`, `Subscriber<T>`) and can be reused
+  for any other event type.
+
+## Simplicity and understandability
+
+- Three packages mirror the three ideas: the notification mechanism, the delivery domain,
+  the participants; package dependencies go in one direction only
+  (participant → delivery → notification).
+- The public API reads like the story: `shop.receiveOrder`, `driver.accept`,
+  `driver.abandon`, `driver.complete`.
+- Every file and method has a documentation comment that says what it does and where it is
+  used; the request's `toString()` makes log lines and test failures readable.
+
+## Avoiding duplicated code
+
+- Broadcasting exists once, in `notifySubscribers()`; both `submit()` and `abandon()` call it.
+- The checks "arguments present and request known" and "request assigned to this driver"
+  exist once each (`requireKnown()`, `requireAssignedTo()`) and are shared by `accept()`,
+  `abandon()` and `complete()`.
+- `Driver.accept()`, `abandon()` and `complete()` are one-line delegations to the dispatcher
+  plus the driver's own availability flag; the rules are not repeated on the driver side.
+
+Why it matters: a rule that lives in one place is changed in one place, behaves the same
+everywhere and is tested once, which means fewer bugs.
+
+## Design patterns
+
+- **Observer** (publish/subscribe): `Publisher<T>` and `Subscriber<T>` are the two roles,
+  `DeliveryDispatcher` is the publisher, `Driver` is the subscriber and `DeliveryRequest` is
+  the pushed event. It was chosen because the problem is exactly the one the pattern solves:
+  one event must reach a varying number of receivers, and the sender must not depend on who
+  they are. The push style means drivers are informed immediately, without polling.
+- The dispatcher also coordinates shops and drivers so that they never reference each other;
+  this resembles the Mediator pattern, which has not been covered in class yet, so it is
+  mentioned here only as a resemblance.
+
+## Tests
+
+`TestDeliverySystem` plays the user scenarios with one shop and five drivers:
+
+- the required scenario: one request is broadcast and all five drivers receive it;
+- an off-duty driver and an unsubscribed driver are not notified;
+- accepting is first come, first served and makes the winner busy;
+- abandoning reopens the request, frees the driver and broadcasts again;
+- completing is final; only the assigned driver may abandon.
+
+## Use of AI assistance
+
+The use of AtomicInteger was suggested by Claude. I also used it to help me write PlantUML code to get a clear UML graph and format the readme file.
+
+# UML Class Diagram
+
+![UML class diagram](uml/UML.jpg)
+
+The same diagram as a PDF: [uml/UML.pdf](uml/UML.pdf). Observer pattern: `DeliveryDispatcher` is the publisher, `Driver` the subscriber, `DeliveryRequest` the pushed event.
 
 # Maven Commands
 
@@ -222,7 +348,7 @@ Maven also integrates with other development tools, such as IDEs and continuous 
 Maven provides a large number of plugins for various tasks, such as compiling code, running tests, generating reports, and creating JAR files. This makes it a versatile tool that can be used for many different types of Java projects.
 
 ## Compile
-Type on the command line: 
+Type on the command line:
 
 ```bash
 mvn clean compile
@@ -259,7 +385,7 @@ Open `target/site/jacoco/index.html` in a browser to see coverage by package, cl
 For example, add tests for different age-calculation paths in `Person` and run `mvn clean verify` again. The report will show whether the new tests exercised those paths. Coverage is a guide to which code your tests execute, not proof that the code is correct: review the assertions and edge cases as well.
 
 
-## Spotbugs 
+## Spotbugs
 
 SpotBugs is a static code analysis tool for Java that detects potential bugs in your code. It is an open-source tool that can be used as a standalone application or integrated into development tools such as Eclipse, IntelliJ, and Gradle.
 
@@ -275,13 +401,13 @@ Use the following command:
 mvn spotbugs:gui 
 ```
 
-For more info see 
+For more info see
 https://spotbugs.readthedocs.io/en/latest/maven.html
 
 SpotBugs https://spotbugs.github.io/ is the spiritual successor of FindBugs.
 
 
-## Checkstyle 
+## Checkstyle
 
 Checkstyle is a development tool for checking Java source code against a set of coding standards. It is an open-source tool that can be integrated into various integrated development environments (IDEs), such as Eclipse and IntelliJ, as well as build tools like Maven and Gradle.
 
@@ -311,7 +437,7 @@ mvn checkstyle:check
 
 With this configuration, the check goal fails when it finds violations. The report-generation command below remains useful for reviewing the detailed results.
 
-The following command will generate a report in HTML format that you can open in a web browser. 
+The following command will generate a report in HTML format that you can open in a web browser.
 
 ```bash
 mvn checkstyle:checkstyle
@@ -319,3 +445,14 @@ mvn checkstyle:checkstyle
 
 The HTML page will be found at the following location:
 `target/site/checkstyle.html`
+
+## Run the demo
+
+`Main` runs a short console demo (one shop, five drivers, one request that is accepted,
+abandoned, broadcast again and completed), using Log4j for the output:
+
+```bash
+mvn compile exec:java
+```
+
+The tests of this assignment are in `src/test/java/edu/bu/met/cs665/TestDeliverySystem.java`.
